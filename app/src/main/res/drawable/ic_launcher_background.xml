@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Uygulama ikonu zemini: buz mavisi dikey gradyan + ust kosede yumusak
+     beyaz parlama (Aero "baloncuk"). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54" android:startY="0"
+                android:endX="54" android:endY="108"
+                android:startColor="#FFF6FBFE"
+                android:centerColor="#FFD3ECFA"
+                android:endColor="#FF9FD3F0" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="86" android:centerY="18"
+                android:gradientRadius="60"
+                android:startColor="#CCFFFFFF"
+                android:endColor="#00FFFFFF" />
+        </aapt:attr>
+    </path>
+</vector>
