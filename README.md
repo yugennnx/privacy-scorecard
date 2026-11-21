@@ -7,15 +7,15 @@ Gizlilik Karnesi, Android uygulamalarının arka planda hangi takip (tracker) ş
 > 🚧 **Geliştirme aşamasında.** Temel özellikler çalışıyor; yeni özellikler eklenmeye devam ediyor.
 
 <p align="center">
-  <img src="docs/ana-ekran.png" width="260" alt="Ana ekran">
-  <img src="docs/detay-ozet.png" width="260" alt="Uygulama detayı: sade özet">
-  <img src="docs/detay-gruplar.png" width="260" alt="Uygulama detayı: amaca göre gruplar">
+  <img src="docs/tanitim.png" alt="Gizlilik Karnesi: tarama, uygulama notları, sade özet ve ayrıntılar">
 </p>
+
+<p align="center"><i>Gerçek telefonda (Samsung Galaxy S23, Android 16) yapılan bir tarama: Brick Blast oyunu 60 saniyede 16 takip şirketine bağlandı ve F notu aldı.</i></p>
 
 ## Ne yapar?
 
 - **Hangi uygulama, hangi şirkete bağlanıyor?** Tarama süresince uygulamaların yaptığı DNS sorgularını yakalar ve her sorguyu onu yapan uygulamaya atar.
-- **Takip şirketlerini tanır.** 121 alan adından oluşan bir listeyle eşleştirme yapar (Google, Meta, AppLovin, Unity, Pangle, Moloco, Mintegral, Criteo...). Her şirketi amacına göre sınıflandırır: reklam, parmak izi, analitik, sosyal medya, hata raporlama.
+- **Takip şirketlerini tanır.** 122 alan adından oluşan bir listeyle eşleştirme yapar (Google, Meta, AppLovin, Unity, Pangle, Moloco, Mintegral, Criteo...). Her şirketi amacına göre sınıflandırır: reklam, parmak izi, analitik, sosyal medya, hata raporlama.
 - **A-F notu verir.** Puan alan adı başına değil, **şirket başına** hesaplanır: reklam ve parmak izi şirketleri 3, analitik ve sosyal medya 2, hata raporlama 1 puandır. 0 puan A, 3'e kadar B, 6'ya kadar C, 10'a kadar D, üstü F'dir.
 - **Bağlantıları ayırır.** Her adres tek bir gruba girer:
   - takip şirketi,
@@ -24,7 +24,7 @@ Gizlilik Karnesi, Android uygulamalarının arka planda hangi takip (tracker) ş
   - tanımlanamayan.
 
   Not yalnızca takip şirketlerinden hesaplanır.
-- **Sade Türkçe anlatır.** Örnek: *"Chrome bu taramada seni 22 takip şirketine tanıttı. Bunların 19 tanesi reklam şirketi."* (iki haber sitesinin gezildiği bir emülatör taraması) Şirketler "Sana reklam gösterenler", "Kullanımını ölçenler" gibi amaç gruplarında gösterilir.
+- **Sade Türkçe anlatır.** Örnek: *"Brick Blast bu taramada seni 16 takip şirketine tanıttı. Bunların 14 tanesi reklam şirketi. 13 bağlantı uygulamanın kendi sunucularına gitti."* Şirketler "Sana reklam gösterenler", "Kullanımını ölçenler" gibi amaç gruplarında gösterilir.
 - **Sonuçları saklar ve dışa aktarır.** Her tarama telefonda kaydedilir. Sonuçlar CSV olarak paylaşılabilir; her satır bir uygulamanın bağlandığı bir adrestir.
 
 ## Nasıl çalışır?

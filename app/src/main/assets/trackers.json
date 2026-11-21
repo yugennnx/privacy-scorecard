@@ -122,7 +122,8 @@
     { "domain": "admatic.com.tr", "company": "AdMatic", "category": "ADVERTISING" },
     { "domain": "analytics.google.com", "company": "Google", "category": "ANALYTICS" },
     { "domain": "adservice.google.com.tr", "company": "Google", "category": "ADVERTISING" },
-    { "domain": "adform.net", "company": "Adform", "category": "ADVERTISING" }
+    { "domain": "adform.net", "company": "Adform", "category": "ADVERTISING" },
+    { "domain": "pglstatp.com", "company": "ByteDance (Pangle)", "category": "ADVERTISING" }
   ],
   "infrastructure": [
     { "domain": "googleapis.com", "provider": "Google Cloud" },
@@ -147,6 +148,7 @@
     { "domain": "windows.net", "provider": "Microsoft Azure" },
     { "domain": "digitaloceanspaces.com", "provider": "DigitalOcean" },
     { "domain": "ytimg.com", "provider": "Google (YouTube)" },
-    { "domain": "b-cdn.net", "provider": "Bunny CDN" }
+    { "domain": "b-cdn.net", "provider": "Bunny CDN" },
+    { "domain": "yandexcloud.net", "provider": "Yandex Cloud" }
   ]
 }

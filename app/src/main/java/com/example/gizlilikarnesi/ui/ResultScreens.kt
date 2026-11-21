@@ -311,9 +311,10 @@ private fun SubjectRow(report: AppReport, onClick: () -> Unit) {
             Text(info.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
             Text(
-                // Kisa tutuldu: dar telefon ekraninda (S23) eski satir ikiye kiriliyordu
-                "${report.companies.size} ŞİRKET · ${report.totalDomains} ADRES",
-                style = HudLabel.copy(color = if (report.companies.isEmpty()) InkFaint else InkSoft),
+                // Genis Michroma (HudLabel) yerine dar Space Grotesk: S23'te
+                // "16 SIRKET · 61 ADRE..." diye kesiliyordu (bkz. gunluk bolum 30)
+                "${report.companies.size} şirket · ${report.totalDomains} adres",
+                style = MaterialTheme.typography.bodyMedium.copy(color = if (report.companies.isEmpty()) InkFaint else InkSoft),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
