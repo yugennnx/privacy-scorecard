@@ -17,7 +17,11 @@ data class ScanRecord(
     val unattributedQueries: Int = 0,
     /** DNS iletim istatistigi (olcum kalitesi icin) */
     val dnsAnswered: Int = 0,
-    val dnsFailed: Int = 0
+    val dnsFailed: Int = 0,
+    /** Paket adi -> (domain -> o domainin bu taramada ilk sorulma zamani, ms) */
+    val firstSeen: Map<String, Map<String, Long>> = emptyMap(),
+    /** Engelleme listesi yuzunden NXDOMAIN ile cevaplanan sorgu sayisi */
+    val blockedQueries: Int = 0
 ) {
     val durationSeconds: Long get() = (endedAtMillis - startedAtMillis) / 1000
 }

@@ -26,7 +26,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.gizlilikarnesi.analysis.TrackerDatabase
+import com.example.gizlilikarnesi.data.BlockList
 import com.example.gizlilikarnesi.data.ScanStore
+import com.example.gizlilikarnesi.analysis.ScanRecord
+import com.example.gizlilikarnesi.ui.WelcomeScreen
 import com.example.gizlilikarnesi.ui.AeroBackground
 import com.example.gizlilikarnesi.analysis.ScanResults
 import com.example.gizlilikarnesi.capture.TrafficVpnService
@@ -45,9 +48,16 @@ import kotlinx.coroutines.withContext
  */
 private const val SCAN_DURATION_SECONDS = 60
 
+private const val KEY_WELCOME_DONE = "welcome_done"
+
 class MainActivity : ComponentActivity() {
 
     private val scanning = mutableStateOf(false)
+
+    /** Ilk acilista (ya da "Nasıl çalışır?" ile) gosterilen karsilama ekrani */
+    private val showWelcome = mutableStateOf(false)
+
+    private val prefs by lazy { getSharedPreferences("app_prefs", MODE_PRIVATE) }
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -59,6 +69,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        showWelcome.value = !prefs.getBoolean(KEY_WELCOME_DONE, false)
+        BlockList.load(this)
         // Zemin her zaman aydinlik: durum cubugu simgeleri koyu olsun
         // (sistem karanlik modda olsa bile).
         enableEdgeToEdge(
@@ -73,13 +85,31 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         containerColor = Color.Transparent
                     ) { innerPadding ->
-                        PrivacyScorecardApp(
-                            modifier = Modifier.padding(innerPadding),
-                            scanning = scanning.value,
-                            onStartClick = { requestVpnPermission() },
-                            onStopClick = { endScan() },
-                            onExportClick = { exportLastScan() }
-                        )
+                        if (showWelcome.value) {
+                            BackHandler(enabled = prefs.getBoolean(KEY_WELCOME_DONE, false)) {
+                                showWelcome.value = false
+                            }
+                            WelcomeScreen(
+                                modifier = Modifier.padding(innerPadding),
+                                onContinue = {
+                                    prefs.edit().putBoolean(KEY_WELCOME_DONE, true).apply()
+                                    showWelcome.value = false
+                                }
+                            )
+                        } else {
+                            PrivacyScorecardApp(
+                                modifier = Modifier.padding(innerPadding),
+                                scanning = scanning.value,
+                                onStartClick = { requestVpnPermission() },
+                                onStopClick = { endScan() },
+                                onExportClick = { exportLastScan() },
+                                onShowWelcome = { showWelcome.value = true },
+                                onToggleBlock = { company -> BlockList.toggle(this@MainActivity, company) },
+                                onOpenScan = { record ->
+                                    ScanResults.publishRecord(record, TrackerDatabase.load(this@MainActivity))
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -97,6 +127,9 @@ class MainActivity : ComponentActivity() {
      * bloklamasin diye IO'da yapilir.
      */
     private fun restoreLastScan() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            ScanResults.setHistory(ScanStore.loadAll(this@MainActivity))
+        }
         if (scanning.value || ScanResults.reports.value.isNotEmpty()) return
         lifecycleScope.launch(Dispatchers.IO) {
             val record = ScanStore.loadLatest(this@MainActivity) ?: return@launch
@@ -172,11 +205,16 @@ fun PrivacyScorecardApp(
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
     onExportClick: () -> Unit,
+    onShowWelcome: () -> Unit,
+    onToggleBlock: (String) -> Unit,
+    onOpenScan: (ScanRecord) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Servisin yayinladigi karneler; her yeni domain'de liste kendiliginden guncellenir.
     val reports by ScanResults.reports.collectAsState()
     val lastScan by ScanResults.lastScan.collectAsState()
+    val history by ScanResults.history.collectAsState()
+    val blocked by BlockList.companies.collectAsState()
 
     // rememberSaveable: ekran donse bile hangi detayda oldugumuz kaybolmasin.
     var selectedPackage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -203,7 +241,12 @@ fun PrivacyScorecardApp(
         AppDetailScreen(
             report = selectedReport,
             onBack = { selectedPackage = null },
-            modifier = modifier
+            modifier = modifier,
+            // Tarama surerken zaman damgalari henuz kayda gecmedi: panel gizli kalir
+            firstSeen = lastScan?.firstSeen?.get(selectedReport.packageName).orEmpty(),
+            scanStartedAt = lastScan?.startedAtMillis,
+            blockedCompanies = blocked,
+            onToggleBlock = onToggleBlock
         )
     } else {
         HomeScreen(
@@ -216,7 +259,10 @@ fun PrivacyScorecardApp(
             onAppClick = { selectedPackage = it.packageName },
             modifier = modifier,
             lastScan = lastScan,
-            onExportClick = onExportClick
+            onExportClick = onExportClick,
+            history = history,
+            onOpenScan = onOpenScan,
+            onShowWelcome = onShowWelcome
         )
     }
 }

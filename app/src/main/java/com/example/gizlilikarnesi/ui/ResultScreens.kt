@@ -37,8 +37,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.example.gizlilikarnesi.analysis.AppReport
+import com.example.gizlilikarnesi.analysis.EarlyContacts
 import com.example.gizlilikarnesi.analysis.ReportSummarizer
+import com.example.gizlilikarnesi.analysis.PrivacyGrader
 import com.example.gizlilikarnesi.analysis.ScanRecord
+import com.example.gizlilikarnesi.analysis.TrackerDatabase
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -135,14 +138,17 @@ fun HomeScreen(
     onAppClick: (AppReport) -> Unit,
     modifier: Modifier = Modifier,
     lastScan: ScanRecord? = null,
-    onExportClick: () -> Unit = {}
+    onExportClick: () -> Unit = {},
+    history: List<ScanRecord> = emptyList(),
+    onOpenScan: (ScanRecord) -> Unit = {},
+    onShowWelcome: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
     ) {
-        item { Header(scanning) }
+        item { Header(scanning, onShowWelcome) }
         item {
             ScanControlPanel(
                 scanning = scanning,
@@ -170,11 +176,14 @@ fun HomeScreen(
                 }
             }
         }
+        if (!scanning && history.isNotEmpty()) {
+            item { HistoryPanel(history, currentId = lastScan?.id, onOpenScan = onOpenScan) }
+        }
     }
 }
 
 @Composable
-private fun Header(scanning: Boolean) {
+private fun Header(scanning: Boolean, onShowWelcome: () -> Unit) {
     Column(modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp)) {
         // Durum kapsulu basligin yaninda degil altinda: "SCANNING" genisleyince
         // basligi iki satira kirmasin.
@@ -182,7 +191,60 @@ private fun Header(scanning: Boolean) {
         Spacer(Modifier.height(4.dp))
         Text("UYGULAMALARIN SENİ KİMLERE ANLATTIĞINI GÖR", style = HudLabel.copy(color = AquaDeep))
         Spacer(Modifier.height(10.dp))
-        StatusPill(scanning)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StatusPill(scanning)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Nasıl çalışır?",
+                style = MaterialTheme.typography.bodyMedium.copy(color = AquaDeep),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onShowWelcome)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Kayitli taramalar: tarih, uygulama sayisi ve en kotu not. Dokununca o
+ * tarama ekrana yuklenir (notlar GUNCEL tracker listesiyle yeniden hesaplanir).
+ */
+@Composable
+private fun HistoryPanel(history: List<ScanRecord>, currentId: String?, onOpenScan: (ScanRecord) -> Unit) {
+    val context = LocalContext.current
+    val rows = remember(history) {
+        val db = TrackerDatabase.load(context)
+        val format = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("tr"))
+        history.map { record ->
+            val worst = record.observed
+                .map { (pkg, domains) -> PrivacyGrader.grade(pkg, domains, db) }
+                .maxByOrNull { it.score }
+            Triple(record, format.format(Date(record.startedAtMillis)), worst?.grade ?: 'A')
+        }
+    }
+    GlassPanel(label = "GEÇMİŞ TARAMALAR", trailingLabel = "%02d".format(history.size)) {
+        rows.forEachIndexed { index, (record, time, worst) ->
+            val current = record.id == currentId
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenScan(record) }
+                    .padding(vertical = 8.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(time, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "${record.observed.size} uygulama · ${record.durationSeconds} sn" +
+                            if (current) " · gösteriliyor" else "",
+                        style = MaterialTheme.typography.bodySmall.copy(color = if (current) AquaDeep else InkSoft)
+                    )
+                }
+                GelBadge(worst, gradeGel(worst), size = 36.dp)
+            }
+            if (index < rows.lastIndex) HairlineDivider()
+        }
     }
 }
 
@@ -329,8 +391,18 @@ private fun SubjectRow(report: AppReport, onClick: () -> Unit) {
 // ---------------------------------------------------------------------------
 
 @Composable
-fun AppDetailScreen(report: AppReport, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun AppDetailScreen(
+    report: AppReport,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    firstSeen: Map<String, Long> = emptyMap(),
+    scanStartedAt: Long? = null,
+    blockedCompanies: Set<String> = emptySet(),
+    onToggleBlock: (String) -> Unit = {}
+) {
     val info = rememberAppInfo(report.packageName)
+    val early = remember(report, firstSeen) { EarlyContacts.analyze(report, firstSeen) }
+    val profile = rememberAdvertiserProfile(report, firstSeen, scanStartedAt)
     val summary = remember(report, info.label) { ReportSummarizer.summarize(report, info.label) }
     val ownDomains = report.firstPartyDomains.sorted()
     // Saglayici -> o saglayicidaki domainler (or. "Amazon CloudFront" -> [...])
@@ -399,6 +471,16 @@ fun AppDetailScreen(report: AppReport, onBack: () -> Unit, modifier: Modifier = 
             }
         }
 
+        // --- Ilk saniyeler: acilir acilmaz baglanilan takip sirketleri ---
+        if (early != null && report.packageName != ScanResults.UNKNOWN_APP) {
+            item { EarlyContactsPanel(early) }
+        }
+
+        // --- Reklamcilarin gozunden sen ---
+        if (profile != null) {
+            item { AdvertiserProfilePanel(profile) }
+        }
+
         // --- Amaca gore gruplar: her grup ayri panel ---
         if (summary.groups.isEmpty()) {
             item {
@@ -425,8 +507,13 @@ fun AppDetailScreen(report: AppReport, onBack: () -> Unit, modifier: Modifier = 
                                 }
                                 .padding(vertical = 10.dp)
                         ) {
+                            val isBlocked = contact.company in blockedCompanies
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(contact.company, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                                if (isBlocked) {
+                                    GelTag("ENGELLİ", GelSilver)
+                                    Spacer(Modifier.width(8.dp))
+                                }
                                 Text(
                                     "${contact.domains.size} adres  ${if (isOpen) "▴" else "▾"}",
                                     style = MaterialTheme.typography.bodySmall.copy(color = InkSoft)
@@ -437,6 +524,20 @@ fun AppDetailScreen(report: AppReport, onBack: () -> Unit, modifier: Modifier = 
                                 contact.domains.forEach { domain ->
                                     Text(domain, style = MaterialTheme.typography.bodySmall.copy(color = Ink), modifier = Modifier.padding(vertical = 2.dp))
                                 }
+                                Spacer(Modifier.height(8.dp))
+                                GelButton(
+                                    if (isBlocked) "ENGELİ KALDIR" else "BU ŞİRKETİ ENGELLE",
+                                    onClick = { onToggleBlock(contact.company) },
+                                    primary = !isBlocked,
+                                    height = 38.dp,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    if (isBlocked) "Tarama açıkken bu şirketin adreslerine \"böyle bir adres yok\" cevabı verilir."
+                                    else "Engelleme tarama açıkken çalışır. Bazı uygulamalarda reklamlar ya da ödüllü videolar açılmayabilir.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
                             }
                         }
                         if (index < group.companies.lastIndex) HairlineDivider()

@@ -12,6 +12,7 @@ import android.system.OsConstants
 import android.util.Log
 import com.example.gizlilikarnesi.analysis.ScanRecord
 import com.example.gizlilikarnesi.analysis.ScanResults
+import com.example.gizlilikarnesi.data.BlockList
 import com.example.gizlilikarnesi.data.ScanStore
 import com.example.gizlilikarnesi.analysis.TrackerDatabase
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +54,9 @@ class TrafficVpnService : VpnService() {
      * gelir; karne icin her domaini bir kez saymak yeterli.
      */
     private val observedDomains = ConcurrentHashMap<String, MutableSet<String>>()
+
+    /** Uygulama -> (domain -> ilk sorulma zamani). Kayitta "ilk saniyeler" icin. */
+    private val firstSeen = ConcurrentHashMap<String, ConcurrentHashMap<String, Long>>()
 
     private var dnsRelay: DnsRelay? = null
 
@@ -137,6 +141,8 @@ class TrafficVpnService : VpnService() {
         ).also { it.start() }
 
         observedDomains.clear()
+        firstSeen.clear()
+        BlockList.load(this)
         attributedQueries = 0
         unattributedQueries = 0
         scanStartedAt = System.currentTimeMillis()
@@ -189,7 +195,8 @@ class TrafficVpnService : VpnService() {
                 Log.d(
                     TAG,
                     "DNS ILETIM: upstream_cevaplanan=${it.answered.get()} cevapsiz=${it.failed.get()} " +
-                        "yerelden_cevaplanan=${it.servedLocally.get()} ort_gecikme=${it.averageLatencyMs}ms"
+                        "yerelden_cevaplanan=${it.servedLocally.get()} engellenen=${it.blocked.get()} " +
+                        "ort_gecikme=${it.averageLatencyMs}ms"
                 )
             }
             input.close()
@@ -200,8 +207,9 @@ class TrafficVpnService : VpnService() {
     }
 
     /**
-     * Ana tespit yolu: DNS sorgusunu once gercek sunucuya iletir (uygulama
-     * cevap alabilsin), sonra hangi uygulamanin hangi domaini sordugunu kaydeder.
+     * Ana tespit yolu: sorgunun sahibi uygulamayi bulur, sorguyu gercek DNS'e
+     * iletir (ya da sirket engelliyse NXDOMAIN ile cevaplar), sonra hangi
+     * uygulamanin hangi domaini ne zaman sordugunu kaydeder.
      */
     private fun handleDnsQuery(buffer: ByteArray, packet: ParsedPacket) {
         // ONCE sahibini bul, SONRA ilet. Ters sirada (eskiden boyleydi) cevap
@@ -217,23 +225,29 @@ class TrafficVpnService : VpnService() {
         )
         if (packageName == null) unattributedQueries++ else attributedQueries++
 
-        // Sorgu her durumda iletilmeli (domaini okuyamasak bile), yoksa
-        // uygulama cevap alamaz ve internet "kopmus" gibi gorunur.
-        dnsRelay?.forward(buffer, packet)
-
         val domain = DnsQueryParser.extractQueryDomain(buffer, packet.payloadOffset, packet.payloadLength)
-            ?: return
+        val tracker = domain?.let { trackerDatabase.match(it) }
+
+        // Kullanici bu sirketi engellediyse gercek DNS'e hic gitme: "boyle bir
+        // adres yok" (NXDOMAIN) cevabi ver. Aksi halde sorgu HER DURUMDA
+        // iletilmeli (domaini okuyamasak bile), yoksa internet kopmus gorunur.
+        val blocked = tracker != null && BlockList.isBlocked(tracker.company) &&
+            dnsRelay?.answerBlocked(buffer, packet) == true
+        if (!blocked) dnsRelay?.forward(buffer, packet)
+
+        if (domain == null) return
 
         val app = packageName ?: ScanResults.UNKNOWN_APP
         val isNew = observedDomains.getOrPut(app) { ConcurrentHashMap.newKeySet() }.add(domain)
         if (!isNew) return
+        // "Ilk saniyeler" analizi icin: bu uygulama bu domaini ilk ne zaman sordu
+        firstSeen.getOrPut(app) { ConcurrentHashMap() }.putIfAbsent(domain, System.currentTimeMillis())
 
         // Yeni domain -> karneleri yeniden hesapla, ekran canli guncellensin.
         ScanResults.publish(observedDomains.mapValues { it.value.toSet() }, trackerDatabase)
 
-        val tracker = trackerDatabase.match(domain)
         val label = tracker?.let { " [TRACKER: ${it.company} / ${it.category.displayName}]" } ?: ""
-        Log.d(TAG, "DNS SORGUSU: app=$app -> domain=$domain$label")
+        Log.d(TAG, "DNS SORGUSU: app=$app -> domain=$domain$label" + if (blocked) " [ENGELLENDI]" else "")
     }
 
     /**
@@ -273,7 +287,9 @@ class TrafficVpnService : VpnService() {
             attributedQueries = attributedQueries,
             unattributedQueries = unattributedQueries,
             dnsAnswered = dnsRelay?.answered?.get() ?: 0,
-            dnsFailed = dnsRelay?.failed?.get() ?: 0
+            dnsFailed = dnsRelay?.failed?.get() ?: 0,
+            firstSeen = firstSeen.mapValues { it.value.toMap() },
+            blockedQueries = dnsRelay?.blocked?.get() ?: 0
         )
         ScanStore.save(this, record)
         ScanResults.publishRecord(record, trackerDatabase)

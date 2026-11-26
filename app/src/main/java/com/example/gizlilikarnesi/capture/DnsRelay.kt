@@ -71,6 +71,8 @@ class DnsRelay(
     val failed = AtomicInteger()
     /** Onbellekten ya da bekleyen ayni soruya eklenerek cevaplanan sorgular */
     val servedLocally = AtomicInteger()
+    /** Kullanicinin engelledigi sirketlere giden ve NXDOMAIN ile cevaplanan sorgular */
+    val blocked = AtomicInteger()
     private val totalLatencyMs = AtomicLong()
     val averageLatencyMs: Long get() = answered.get().let { if (it > 0) totalLatencyMs.get() / it else 0 }
 
@@ -83,6 +85,28 @@ class DnsRelay(
         inFlightById.clear()
         inFlightByKey.clear()
         cache.clear()
+    }
+
+    /**
+     * Engellenen bir sorguya gercek DNS'e gitmeden NXDOMAIN cevabi verir.
+     * @return cevap verildiyse true; sorgu cozulemediyse false (cagiran normal iletir)
+     */
+    fun answerBlocked(buffer: ByteArray, packet: ParsedPacket): Boolean {
+        if (packet.payloadLength < 12) return false
+        val query = buffer.copyOfRange(packet.payloadOffset, packet.payloadOffset + packet.payloadLength)
+        val response = DnsResponseBuilder.nxdomain(query) ?: return false
+        deliver(
+            response, response.size,
+            Waiter(
+                originalId = readId(query),
+                appAddress = packet.sourceAddress.address,
+                appPort = packet.sourcePort,
+                dnsAddress = packet.destAddress.address,
+                dnsPort = packet.destPort
+            )
+        )
+        blocked.incrementAndGet()
+        return true
     }
 
     /** Okuma dongusunden cagrilir; buffer tekrar kullanildigi icin kopyalar. */

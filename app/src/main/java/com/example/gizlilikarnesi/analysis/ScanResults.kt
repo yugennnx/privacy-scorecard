@@ -27,6 +27,14 @@ object ScanResults {
     private val _lastScan = MutableStateFlow<ScanRecord?>(null)
     val lastScan: StateFlow<ScanRecord?> = _lastScan.asStateFlow()
 
+    /** Diskteki kayitli taramalar (en yeni once) -- "Gecmis taramalar" paneli icin. */
+    private val _history = MutableStateFlow<List<ScanRecord>>(emptyList())
+    val history: StateFlow<List<ScanRecord>> = _history.asStateFlow()
+
+    fun setHistory(records: List<ScanRecord>) {
+        _history.value = records
+    }
+
     fun clear() {
         _reports.value = emptyList()
         _lastScan.value = null

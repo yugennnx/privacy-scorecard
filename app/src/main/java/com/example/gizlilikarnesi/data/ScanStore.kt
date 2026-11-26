@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.gizlilikarnesi.analysis.ScanCsv
 import com.example.gizlilikarnesi.analysis.ScanRecord
+import com.example.gizlilikarnesi.analysis.ScanResults
 import com.example.gizlilikarnesi.analysis.TrackerDatabase
 import org.json.JSONArray
 import org.json.JSONObject
@@ -32,7 +33,7 @@ object ScanStore {
     fun save(context: Context, record: ScanRecord) {
         runCatching {
             val json = JSONObject()
-                .put("version", 1)
+                .put("version", 2)
                 .put("id", record.id)
                 .put("startedAt", record.startedAtMillis)
                 .put("endedAt", record.endedAtMillis)
@@ -40,6 +41,12 @@ object ScanStore {
                 .put("unattributedQueries", record.unattributedQueries)
                 .put("dnsAnswered", record.dnsAnswered)
                 .put("dnsFailed", record.dnsFailed)
+                .put("blockedQueries", record.blockedQueries)
+                .put("firstSeen", JSONObject().apply {
+                    record.firstSeen.forEach { (pkg, times) ->
+                        put(pkg, JSONObject().apply { times.forEach { (d, t) -> put(d, t) } })
+                    }
+                })
                 .put("observed", JSONObject().apply {
                     record.observed.forEach { (pkg, domains) ->
                         put(pkg, JSONArray(domains.sorted()))
@@ -47,6 +54,7 @@ object ScanStore {
                 })
             File(scansDir(context), "${record.id}.json").writeText(json.toString(2))
             Log.d(TAG, "Tarama kaydedildi: ${record.id} (${record.observed.size} uygulama)")
+            ScanResults.setHistory(loadAll(context))
         }.onFailure { Log.e(TAG, "Tarama kaydedilemedi", it) }
     }
 
@@ -58,6 +66,14 @@ object ScanStore {
 
     fun count(context: Context): Int =
         scansDir(context).listFiles { f -> f.extension == "json" }?.size ?: 0
+
+    /** Kayitli taramalar, en yeni once (en fazla [limit] tane). */
+    fun loadAll(context: Context, limit: Int = 30): List<ScanRecord> =
+        scansDir(context).listFiles { f -> f.extension == "json" }
+            ?.sortedByDescending { it.name }
+            ?.take(limit)
+            ?.mapNotNull { load(it) }
+            ?: emptyList()
 
     private fun load(file: File): ScanRecord? = runCatching {
         val json = JSONObject(file.readText())
@@ -74,7 +90,15 @@ object ScanStore {
             attributedQueries = json.optInt("attributedQueries"),
             unattributedQueries = json.optInt("unattributedQueries"),
             dnsAnswered = json.optInt("dnsAnswered"),
-            dnsFailed = json.optInt("dnsFailed")
+            dnsFailed = json.optInt("dnsFailed"),
+            // v1 kayitlarda yok: bos kalir, "ilk saniyeler" paneli gosterilmez
+            firstSeen = json.optJSONObject("firstSeen")?.let { fs ->
+                fs.keys().asSequence().associateWith { pkg ->
+                    val o = fs.getJSONObject(pkg)
+                    o.keys().asSequence().associateWith { o.getLong(it) }
+                }
+            } ?: emptyMap(),
+            blockedQueries = json.optInt("blockedQueries")
         )
     }.onFailure { Log.e(TAG, "Kayit okunamadi: ${file.name}", it) }.getOrNull()
 

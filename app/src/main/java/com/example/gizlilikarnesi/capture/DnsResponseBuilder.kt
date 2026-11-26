@@ -48,6 +48,39 @@ object DnsResponseBuilder {
     }
 
     /**
+     * Engellenen bir sorgu icin "boyle bir alan adi yok" (NXDOMAIN) cevabi.
+     * Gercek DNS'e hic gidilmez; uygulama adresi bulamaz ve baglanamaz.
+     *
+     * Cevap = sorgunun basligi + soru bolumu (aynen), ama:
+     *  - QR=1 (bu bir cevap), opcode ve RD sorgudan kopyalanir, RA=1
+     *  - RCODE=3 (NXDOMAIN)
+     *  - cevap/yetki/ek kayit sayilari 0 (sorgudaki EDNS eki atilir)
+     * Soru bolumu okunamazsa null doner (o zaman sorgu normal iletilir).
+     */
+    fun nxdomain(query: ByteArray): ByteArray? {
+        if (query.size < 12) return null
+        // Soru bolumunun sonunu bul: QNAME etiketleri 0 ile biter, sonra QTYPE+QCLASS (4 bayt)
+        var i = 12
+        while (i < query.size) {
+            val len = query[i].toInt() and 0xFF
+            if (len == 0) break
+            if (len and 0xC0 != 0) return null // soruda sikistirma beklenmez
+            i += len + 1
+        }
+        val end = i + 1 + 4
+        if (i >= query.size || end > query.size) return null
+
+        val response = query.copyOf(end)
+        response[2] = (0x80 or (query[2].toInt() and 0x79)).toByte() // QR + opcode + RD
+        response[3] = (0x80 or 0x03).toByte()                         // RA + NXDOMAIN
+        writeShort(response, 4, 1)  // soru sayisi
+        writeShort(response, 6, 0)  // cevap
+        writeShort(response, 8, 0)  // yetki
+        writeShort(response, 10, 0) // ek kayit
+        return response
+    }
+
+    /**
      * Internet checksum (RFC 1071): basligi 16 bitlik kelimeler halinde topla,
      * tasmalari geri ekle, sonucun tersini al. Alici ayni toplamayi yapip
      * 0xFFFF bulursa baslik bozulmamis demektir.
