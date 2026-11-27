@@ -31,6 +31,19 @@ object ScanResults {
     private val _history = MutableStateFlow<List<ScanRecord>>(emptyList())
     val history: StateFlow<List<ScanRecord>> = _history.asStateFlow()
 
+    /**
+     * Tarama suruyorsa baslangic zamani, durduysa null. TEK dogru kaynak
+     * servistir: tarama artik suresiz oldugu icin kullanici uygulamadan cikip
+     * saatler sonra donebilir ya da bildirimden durdurabilir; ekran bu durumu
+     * kendisi tutsaydi bu durumlarda yanlis gosterirdi.
+     */
+    private val _scanStartedAt = MutableStateFlow<Long?>(null)
+    val scanStartedAt: StateFlow<Long?> = _scanStartedAt.asStateFlow()
+
+    fun setScanning(startedAt: Long?) {
+        _scanStartedAt.value = startedAt
+    }
+
     fun setHistory(records: List<ScanRecord>) {
         _history.value = records
     }

@@ -187,7 +187,11 @@ class DnsRelay(
             } ?: continue // gec/yinelenen cevap
 
             val response = buffer.copyOf(packet.length)
-            cache[entry.key] = CachedAnswer(response, System.currentTimeMillis() + CACHE_TTL_MS)
+            val now = System.currentTimeMillis()
+            // Tarama suresiz oldugu icin suresi dolmus cevaplar ara ara silinir;
+            // yoksa saatlerce suren taramada onbellek surekli buyurdu.
+            if (cache.size > CACHE_MAX_ENTRIES) cache.entries.removeIf { it.value.expiresAt <= now }
+            cache[entry.key] = CachedAnswer(response, now + CACHE_TTL_MS)
             answered.incrementAndGet()
             totalLatencyMs.addAndGet(System.currentTimeMillis() - entry.sentAt)
 
@@ -234,5 +238,6 @@ class DnsRelay(
         private const val ATTEMPT_TIMEOUT_MS = 1500L
         private const val MAX_ATTEMPTS = 3
         private const val CACHE_TTL_MS = 30_000L
+        private const val CACHE_MAX_ENTRIES = 500
     }
 }

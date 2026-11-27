@@ -26,6 +26,19 @@ data class ScanRecord(
     val durationSeconds: Long get() = (endedAtMillis - startedAtMillis) / 1000
 }
 
+/** Sureyi kisa Turkce yazar: 45 sn, 3 dk 12 sn, 1 sa 5 dk (tarama suresiz oldugu icin). */
+fun formatDuration(totalSeconds: Long): String {
+    val s = totalSeconds.coerceAtLeast(0)
+    val h = s / 3600
+    val m = (s % 3600) / 60
+    val sec = s % 60
+    return when {
+        h > 0 -> if (m > 0) "$h sa $m dk" else "$h sa"
+        m > 0 -> if (sec > 0) "$m dk $sec sn" else "$m dk"
+        else -> "$sec sn"
+    }
+}
+
 /**
  * Tarama sonuclarini CSV'ye (Excel/Google Sheets/Python ile acilabilen
  * tablo) cevirir. Her satir = bir uygulamanin baglandigi bir domain.

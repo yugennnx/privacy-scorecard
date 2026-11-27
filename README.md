@@ -59,7 +59,7 @@ Gereksinimler: Android Studio, Android 10 (API 29) veya üstü bir cihaz ya da e
 ./gradlew testDebugUnitTest    # birim testleri
 ```
 
-Kullanım: **TARAMAYI BAŞLAT**'a bas, VPN iznini onayla, incelemek istediğin uygulamaları 60 saniye içinde kullan, sonra Gizlilik Karnesi'ne dön.
+Kullanım: **TARAMAYI BAŞLAT**'a bas, VPN iznini onayla ve incelemek istediğin uygulamaları kullan. Tarama sen durdurana kadar sürer; uygulamadan ya da bildirimdeki **DURDUR** düğmesinden kapatabilirsin.
 
 ## Proje yapısı
 

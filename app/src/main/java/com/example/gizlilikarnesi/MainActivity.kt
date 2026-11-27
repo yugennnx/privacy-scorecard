@@ -1,7 +1,10 @@
 package com.example.gizlilikarnesi
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -17,7 +20,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -41,23 +45,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * Tek bir tarama oturumunun suresi: bu sure sonunda VPN otomatik kapanir.
- * Internet tarama sirasinda kesilmedigi icin (bolum 18) kullaniciya rahatca
- * birkac uygulama acip kullanma firsati veren bir sure secildi.
- */
-private const val SCAN_DURATION_SECONDS = 60
-
 private const val KEY_WELCOME_DONE = "welcome_done"
+private const val KEY_NOTIFICATION_ASKED = "notification_asked"
 
 class MainActivity : ComponentActivity() {
-
-    private val scanning = mutableStateOf(false)
 
     /** Ilk acilista (ya da "Nasıl çalışır?" ile) gosterilen karsilama ekrani */
     private val showWelcome = mutableStateOf(false)
 
     private val prefs by lazy { getSharedPreferences("app_prefs", MODE_PRIVATE) }
+
+    /**
+     * Android 13+ bildirim izni. Tarama suresiz oldugu icin bildirimdeki
+     * "DURDUR" dugmesi onemli; izin verilmese de tarama yine baslar.
+     */
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { requestVpnPermission() }
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -97,10 +101,12 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else {
+                            // Tarama durumu servisten gelir (bkz. ScanResults.scanStartedAt)
+                            val startedAt by ScanResults.scanStartedAt.collectAsState()
                             PrivacyScorecardApp(
                                 modifier = Modifier.padding(innerPadding),
-                                scanning = scanning.value,
-                                onStartClick = { requestVpnPermission() },
+                                scanStartedAt = startedAt,
+                                onStartClick = { startScanFlow() },
                                 onStopClick = { endScan() },
                                 onExportClick = { exportLastScan() },
                                 onShowWelcome = { showWelcome.value = true },
@@ -130,7 +136,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             ScanResults.setHistory(ScanStore.loadAll(this@MainActivity))
         }
-        if (scanning.value || ScanResults.reports.value.isNotEmpty()) return
+        if (ScanResults.scanStartedAt.value != null || ScanResults.reports.value.isNotEmpty()) return
         lifecycleScope.launch(Dispatchers.IO) {
             val record = ScanStore.loadLatest(this@MainActivity) ?: return@launch
             if (ScanResults.reports.value.isEmpty()) {
@@ -167,6 +173,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Once (gerekirse, bir kez) bildirim izni, sonra VPN izni, sonra tarama. */
+    private fun startScanFlow() {
+        val needsNotificationPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean(KEY_NOTIFICATION_ASKED, false)
+        if (needsNotificationPermission) {
+            prefs.edit().putBoolean(KEY_NOTIFICATION_ASKED, true).apply()
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            requestVpnPermission()
+        }
+    }
+
     private fun requestVpnPermission() {
         val intent = VpnService.prepare(this)
         if (intent != null) {
@@ -181,7 +200,6 @@ class MainActivity : ComponentActivity() {
             action = TrafficVpnService.ACTION_START
         }
         startForegroundService(intent)
-        scanning.value = true
     }
 
     private fun endScan() {
@@ -189,7 +207,6 @@ class MainActivity : ComponentActivity() {
             action = TrafficVpnService.ACTION_STOP
         }
         startService(intent)
-        scanning.value = false
     }
 }
 
@@ -201,7 +218,7 @@ class MainActivity : ComponentActivity() {
  */
 @Composable
 fun PrivacyScorecardApp(
-    scanning: Boolean,
+    scanStartedAt: Long?,
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
     onExportClick: () -> Unit,
@@ -219,16 +236,14 @@ fun PrivacyScorecardApp(
     // rememberSaveable: ekran donse bile hangi detayda oldugumuz kaybolmasin.
     var selectedPackage by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Geri sayim sayaci composable icinde tutulur ki her saniye UI guncellensin.
-    var remainingSeconds by rememberSaveable { mutableIntStateOf(SCAN_DURATION_SECONDS) }
-    LaunchedEffect(scanning) {
-        if (scanning) {
-            remainingSeconds = SCAN_DURATION_SECONDS
-            while (remainingSeconds > 0) {
-                delay(1000)
-                remainingSeconds--
-            }
-            onStopClick()
+    // Tarama suresiz: kullanici durdurana kadar surer. Ekranda gecen sure
+    // gosterilir; sayac yalnizca ekrani gunceller, taramayi durdurmaz.
+    val scanning = scanStartedAt != null
+    var elapsedSeconds by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(scanStartedAt) {
+        while (scanStartedAt != null) {
+            elapsedSeconds = (System.currentTimeMillis() - scanStartedAt) / 1000
+            delay(1000)
         }
     }
 
@@ -251,8 +266,7 @@ fun PrivacyScorecardApp(
     } else {
         HomeScreen(
             scanning = scanning,
-            remainingSeconds = remainingSeconds,
-            totalSeconds = SCAN_DURATION_SECONDS,
+            elapsedSeconds = elapsedSeconds,
             reports = reports,
             onStartClick = onStartClick,
             onStopClick = onStopClick,

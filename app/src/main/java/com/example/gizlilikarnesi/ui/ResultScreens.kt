@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import com.example.gizlilikarnesi.analysis.formatDuration
 import com.example.gizlilikarnesi.analysis.AppReport
 import com.example.gizlilikarnesi.analysis.EarlyContacts
 import com.example.gizlilikarnesi.analysis.ReportSummarizer
@@ -130,8 +131,7 @@ fun AppIcon(info: AppDisplayInfo, size: Dp = 46.dp) {
 @Composable
 fun HomeScreen(
     scanning: Boolean,
-    remainingSeconds: Int,
-    totalSeconds: Int,
+    elapsedSeconds: Long,
     reports: List<AppReport>,
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
@@ -152,8 +152,7 @@ fun HomeScreen(
         item {
             ScanControlPanel(
                 scanning = scanning,
-                remainingSeconds = remainingSeconds,
-                totalSeconds = totalSeconds,
+                elapsedSeconds = elapsedSeconds,
                 onStartClick = onStartClick,
                 onStopClick = onStopClick
             )
@@ -236,7 +235,7 @@ private fun HistoryPanel(history: List<ScanRecord>, currentId: String?, onOpenSc
                 Column(modifier = Modifier.weight(1f)) {
                     Text(time, style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "${record.observed.size} uygulama · ${record.durationSeconds} sn" +
+                        "${record.observed.size} uygulama · ${formatDuration(record.durationSeconds)}" +
                             if (current) " · gösteriliyor" else "",
                         style = MaterialTheme.typography.bodySmall.copy(color = if (current) AquaDeep else InkSoft)
                     )
@@ -273,22 +272,20 @@ private fun StatusPill(scanning: Boolean) {
 @Composable
 private fun ScanControlPanel(
     scanning: Boolean,
-    remainingSeconds: Int,
-    totalSeconds: Int,
+    elapsedSeconds: Long,
     onStartClick: () -> Unit,
     onStopClick: () -> Unit
 ) {
     GlassPanel(label = "TARAMA", trailingLabel = if (scanning) "CANLI" else null) {
         if (scanning) {
             HudRow("DURUM", "DNS izleniyor", valueColor = AquaDeep)
-            HudRow("KALAN SÜRE", "$remainingSeconds sn")
-            Spacer(Modifier.height(12.dp))
-            GelProgressBar(progress = 1f - remainingSeconds.toFloat() / totalSeconds)
+            HudRow("GEÇEN SÜRE", formatDuration(elapsedSeconds))
             Spacer(Modifier.height(12.dp))
             SignalWaveform(active = true)
             Spacer(Modifier.height(10.dp))
             Text(
-                "İnternetin kesilmez. İncelemek istediğin uygulamaları açıp kullan, sonra buraya dön.",
+                "İnternetin kesilmez. Tarama sen durdurana kadar sürer; incelemek istediğin uygulamaları kullan, " +
+                    "bitince buradan ya da bildirimdeki DURDUR düğmesinden kapat.",
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(Modifier.height(14.dp))
@@ -301,7 +298,7 @@ private fun ScanControlPanel(
             Spacer(Modifier.height(14.dp))
             SignalWaveform(active = false)
             Spacer(Modifier.height(14.dp))
-            GelButton("TARAMAYI BAŞLAT  ·  ${totalSeconds} sn", onClick = onStartClick, modifier = Modifier.fillMaxWidth())
+            GelButton("TARAMAYI BAŞLAT", onClick = onStartClick, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -341,7 +338,7 @@ private fun SessionSummaryPanel(
                 SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("tr")).format(Date(lastScan.startedAtMillis))
             }
             Text(
-                "Son tarama: $time · ${lastScan.durationSeconds} sn",
+                "Son tarama: $time · ${formatDuration(lastScan.durationSeconds)}",
                 style = MaterialTheme.typography.bodySmall.copy(color = InkSoft)
             )
             Spacer(Modifier.height(10.dp))

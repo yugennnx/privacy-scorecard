@@ -3,6 +3,7 @@ package com.example.gizlilikarnesi.capture
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.VpnService
@@ -10,6 +11,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import android.util.Log
+import com.example.gizlilikarnesi.MainActivity
 import com.example.gizlilikarnesi.analysis.ScanRecord
 import com.example.gizlilikarnesi.analysis.ScanResults
 import com.example.gizlilikarnesi.data.BlockList
@@ -18,6 +20,7 @@ import com.example.gizlilikarnesi.analysis.TrackerDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -83,6 +86,13 @@ class TrafficVpnService : VpnService() {
 
         /** Agin kendi DNS'i cevap vermezse sirayla denenecek yedekler. */
         private val FALLBACK_DNS = listOf("8.8.8.8", "1.1.1.1")
+
+        /**
+         * Tarama suresiz: kullanici durdurana kadar surer. Telefon uygulamayi
+         * arka planda kapatirsa veri kaybolmasin diye bu aralikla ara kayit
+         * yapilir (ayni dosyanin uzerine yazilir).
+         */
+        private const val AUTOSAVE_INTERVAL_MS = 60_000L
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,6 +112,7 @@ class TrafficVpnService : VpnService() {
             return
         }
 
+        scanStartedAt = System.currentTimeMillis()
         startForeground(NOTIFICATION_ID, buildNotification())
 
         // VPN kurulmadan ONCE: o anki gercek agin DNS sunucusunu ogren.
@@ -126,6 +137,8 @@ class TrafficVpnService : VpnService() {
         val fd = builder.establish()
         if (fd == null) {
             Log.e(TAG, "VPN arayuzu kurulamadi (establish() null dondu)")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
             return
         }
         vpnInterface = fd
@@ -145,10 +158,11 @@ class TrafficVpnService : VpnService() {
         BlockList.load(this)
         attributedQueries = 0
         unattributedQueries = 0
-        scanStartedAt = System.currentTimeMillis()
         ScanResults.clear()
+        ScanResults.setScanning(scanStartedAt)
         Log.d(TAG, "VPN baslatildi, paket okuma dongusu basliyor")
         serviceScope.launch { runPacketLoop(fd, output) }
+        serviceScope.launch { autosaveLoop() }
     }
 
     private fun runPacketLoop(fd: ParcelFileDescriptor, output: FileOutputStream) {
@@ -203,6 +217,18 @@ class TrafficVpnService : VpnService() {
             output.close()
             logScanReport()
             saveScan()
+            // Kayit yayinlandiktan SONRA "tarama bitti" de: ekran bos sonuc gostermesin.
+            ScanResults.setScanning(null)
+        }
+    }
+
+    /** Tarama surdukce belirli araliklarla diske yazar (sonuc ekrani degismez). */
+    private suspend fun autosaveLoop() {
+        while (vpnInterface != null) {
+            delay(AUTOSAVE_INTERVAL_MS)
+            if (vpnInterface == null || observedDomains.isEmpty()) continue
+            runCatching { ScanStore.save(this, buildRecord()) }
+                .onSuccess { Log.d(TAG, "ARA KAYIT: ${observedDomains.size} uygulama") }
         }
     }
 
@@ -279,7 +305,14 @@ class TrafficVpnService : VpnService() {
      */
     private fun saveScan() {
         if (observedDomains.isEmpty()) return
-        val record = ScanRecord(
+        val record = buildRecord()
+        ScanStore.save(this, record)
+        ScanResults.publishRecord(record, trackerDatabase)
+    }
+
+    /** Su ana kadar toplanan gozlemden tarama kaydi olusturur. */
+    private fun buildRecord(): ScanRecord =
+        ScanRecord(
             id = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(scanStartedAt)),
             startedAtMillis = scanStartedAt,
             endedAtMillis = System.currentTimeMillis(),
@@ -291,9 +324,6 @@ class TrafficVpnService : VpnService() {
             firstSeen = firstSeen.mapValues { it.value.toMap() },
             blockedQueries = dnsRelay?.blocked?.get() ?: 0
         )
-        ScanStore.save(this, record)
-        ScanResults.publishRecord(record, trackerDatabase)
-    }
 
     /** VPN acilmadan once aktif agin (Wi-Fi/mobil) IPv4 DNS sunucusunu bulur. */
     private fun findUnderlyingDns(): InetAddress? = runCatching {
@@ -349,11 +379,31 @@ class TrafficVpnService : VpnService() {
             manager.createNotificationChannel(channel)
         }
 
+        // Bildirime dokununca uygulama acilir; "DURDUR" taramayi uygulamayi
+        // acmadan bitirir (suresiz taramada onemli).
+        val open = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val stop = PendingIntent.getService(
+            this, 1,
+            Intent(this, TrafficVpnService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Gizlilik Karnesi")
-            .setContentText("Uygulama trafigi izleniyor")
+            .setContentTitle("Gizlilik Karnesi · tarama sürüyor")
+            .setContentText("Uygulamaların bağlantıları izleniyor. İnternetin kesilmez.")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setOngoing(true)
+            // Gecen sureyi bildirimde canli gosterir (sistem sayar, pil harcamaz)
+            .setWhen(scanStartedAt)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setContentIntent(open)
+            .addAction(
+                Notification.Action.Builder(null, "DURDUR", stop).build()
+            )
             .build()
     }
 
